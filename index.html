@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Card Pre-Grader</title>
+<meta name="description" content="Centering, edge wear and a grade estimate for trading cards, worked out on your phone.">
+<meta name="theme-color" content="#14171c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pre-Grader">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+/* Layout: one narrow column, like holding a card in a toploader. Results read top to
+   bottom: verdict, grade, the card itself, then the detail. */
+:root {
+  --bg: #f3f4f1;          /* card table */
+  --panel: #ffffff;
+  --ink: #16191d;
+  --muted: #5d6570;
+  --line: #d9dcd6;
+  --accent: #1f6f5c;      /* playmat green */
+  --accent-ink: #ffffff;
+  --good: #1d7a45; --good-bg: #e3f3e8;
+  --warn: #9a5b00; --warn-bg: #fbefd9;
+  --bad: #b3261e;  --bad-bg: #fbe4e2;
+  --outer: #18b04a;       /* card edge line */
+  --inner: #e02ee0;       /* artwork border line */
+  --display: "Space Grotesk", "SF Pro Display", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #1a1f25; --ink: #eef0ec; --muted: #9aa3ad; --line: #2c333b;
+    --accent: #3fa58a; --accent-ink: #0d1412;
+    --good: #5fd08c; --good-bg: #16301f; --warn: #f0b45a; --warn-bg: #33270f; --bad: #ff7a70; --bad-bg: #3a1a18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #1a1f25; --ink: #eef0ec; --muted: #9aa3ad; --line: #2c333b;
+  --accent: #3fa58a; --accent-ink: #0d1412;
+  --good: #5fd08c; --good-bg: #16301f; --warn: #f0b45a; --warn-bg: #33270f; --bad: #ff7a70; --bad-bg: #3a1a18;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: calc(env(safe-area-inset-top, 0px) + 18px) calc(env(safe-area-inset-bottom, 0px) + 32px);
+}
+img { max-width: 100%; display: block; }
+[hidden] { display: none !important; }
+main { max-width: 560px; margin: 0 auto; display: grid; gap: 18px; }
+.stack { display: grid; gap: 18px; min-width: 0; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: 1.75rem; line-height: 1.1; }
+h2 { font-size: 1.15rem; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+.eyebrow { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+
+header { display: grid; gap: 6px; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
+.dot.ready { background: var(--good); }
+.dot.err { background: var(--bad); }
+
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.slot { position: relative; display: grid; place-items: center; aspect-ratio: 63.5 / 88.9; border: 2px dashed var(--line);
+  border-radius: 12px; background: var(--panel); overflow: hidden; cursor: pointer; text-align: center; padding: 10px; }
+.slot:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slot input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.slot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.slot .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.65); color: #fff; font-size: 0.75rem;
+  padding: 2px 8px; border-radius: 99px; z-index: 1; }
+.slot .clear { position: absolute; right: 6px; top: 6px; z-index: 2; border: 0; background: rgba(0,0,0,.65); color: #fff;
+  border-radius: 99px; width: 28px; height: 28px; font-size: 16px; cursor: pointer; }
+.slot strong { font-family: var(--display); font-size: 1.05rem; }
+
+button { font: inherit; }
+.btn { appearance: none; border: 0; border-radius: 12px; padding: 14px 18px; font-weight: 650; font-size: 1.02rem;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer; width: 100%; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
+.btn:focus-visible, .chip:focus-visible, .seg button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row > .btn { flex: 1 1 140px; width: auto; }
+
+details { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+details summary { cursor: pointer; font-weight: 600; }
+details ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+
+.progress { display: grid; gap: 8px; }
+.bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 40%; background: var(--accent); border-radius: 99px; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; opacity: .5; } }
+
+.verdict { border-left: 6px solid var(--muted); }
+.verdict.send { border-color: var(--good); background: var(--good-bg); }
+.verdict.maybe { border-color: var(--warn); background: var(--warn-bg); }
+.verdict.skip { border-color: var(--bad); background: var(--bad-bg); }
+.verdict h2 { font-size: 1.3rem; }
+.verdict ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.grades { display: grid; gap: 0; }
+.grade { display: grid; grid-template-columns: 4.2rem 1fr auto; gap: 4px 12px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--line); }
+.grade:first-child { border-top: 0; padding-top: 0; }
+.grade .co { font-weight: 700; color: var(--muted); font-size: 0.9rem; letter-spacing: 0.05em; }
+.grade .lab { font-family: var(--display); font-size: 1.6rem; font-weight: 700; line-height: 1; }
+.grade .pct { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.1rem; }
+.grade .sub { grid-column: 2 / 4; font-size: 0.85rem; color: var(--muted); }
+.conf { font-size: 0.85rem; }
+
+.tabs { display: flex; gap: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--ink); padding: 8px 14px; font-weight: 600; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+.stage { position: relative; border-radius: 10px; overflow: hidden; background: #000; touch-action: pan-y; }
+.stage.editing { touch-action: none; outline: 3px solid var(--accent); }
+.stage canvas { display: block; width: 100%; height: auto; }
+#loupe { position: absolute; left: 8px; top: 8px; width: 132px; height: 132px; border-radius: 50%; border: 3px solid #fff;
+  box-shadow: 0 2px 10px rgba(0,0,0,.5); pointer-events: none; }
+
+.measure { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.measure div { display: grid; gap: 2px; }
+.measure b { font-family: var(--display); font-size: 1.9rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.measure span { font-size: 0.82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 99px; padding: 6px 11px;
+  font-size: 0.85rem; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.chip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.chip[aria-pressed="true"] { border-color: var(--ink); font-weight: 700; }
+.nudge { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.nudge .btn { padding: 12px; }
+.switch { display: flex; align-items: center; gap: 10px; font-size: 0.95rem; }
+.switch input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.corners { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.corners figure { margin: 0; position: relative; }
+.corners figcaption { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 0.72rem; padding: 1px 7px; border-radius: 99px; }
+.corners img { border-radius: 8px; width: 100%; }
+
+.targets { display: grid; gap: 6px; }
+.target { display: flex; justify-content: space-between; gap: 10px; font-size: 0.95rem; }
+.pill { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.pill.good, .pill.pass { color: var(--good); background: var(--good-bg); }
+.pill.check, .pill.borderline { color: var(--warn); background: var(--warn-bg); }
+.pill.problem, .pill.fail { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--muted); background: var(--bg); }
+
+.findings { display: grid; gap: 14px; }
+.findings section { display: grid; gap: 8px; }
+.finding { display: grid; grid-template-columns: 5.6rem 1fr; gap: 8px; align-items: start; font-size: 0.93rem; }
+.finding .pill { justify-self: start; margin-top: 2px; }
+
+.report img { border-radius: 8px; border: 1px solid var(--line); }
+.error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; font-size: 0.93rem; }
+footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="eyebrow">Card Pre-Grader</span>
+    <h1>Should this card go in for grading?</h1>
+    <p class="muted">Take a photo of the card. This phone measures the centering, checks the edges and corners for wear, and estimates a PSA, BGS and CGC grade. Your photos stay on this phone.</p>
+    <span class="status" id="status"><span class="dot" id="dot"></span><span id="statusText">Getting the grader ready…</span></span>
+  </header>
+
+  <section class="slots" aria-label="Card photos">
+    <label class="slot" id="slot-front">
+      <span class="tag">Front</span>
+      <span class="slot-empty"><strong>Front</strong><br><span class="muted small">Tap to take or choose a photo</span></span>
+      <img alt="" hidden>
+      <input type="file" accept="image/*" id="file-front" aria-label="Front photo">
+    </label>
+    <label class="slot" id="slot-back">
+      <span class="tag">Back</span>
+      <span class="slot-empty"><strong>Back</strong><br><span class="muted small">Optional, but needed for a full answer</span></span>
+      <img alt="" hidden>
+      <input type="file" accept="image/*" id="file-back" aria-label="Back photo">
+    </label>
+  </section>
+
+  <details>
+    <summary>How to take a good photo</summary>
+    <ul>
+      <li>Take the card out of its sleeve or toploader.</li>
+      <li>Lay it flat on something plain and dark (a black mousepad or black paper). For a black-bordered card, use a light grey surface.</li>
+      <li>Use bright, even light, like daylight near a window. No flash, no shadows across the card.</li>
+      <li>Hold the phone straight above the card and get close: the card should fill most of the picture.</li>
+      <li>Tap the card on screen to focus before you take the picture.</li>
+    </ul>
+  </details>
+
+  <button class="btn" id="grade" disabled>Grade card</button>
+  <div class="progress" id="progress" hidden><span class="small muted" id="progressText">Working…</span><div class="bar"><i></i></div></div>
+  <div class="error" id="error" role="alert" hidden></div>
+
+  <div id="results" class="stack" hidden>
+      <section class="panel verdict" id="verdict" aria-live="polite"></section>
+
+      <section class="panel">
+        <span class="eyebrow">Predicted grade</span>
+        <div class="grades" id="grades"></div>
+        <p class="conf" id="conf"></p>
+      </section>
+
+      <section class="panel">
+        <div class="row" style="justify-content:space-between">
+          <span class="eyebrow">Centering</span>
+          <div class="seg" id="sideTabs" role="group" aria-label="Card side">
+            <button id="tab-front" aria-pressed="true">Front</button>
+            <button id="tab-back" aria-pressed="false">Back</button>
+          </div>
+        </div>
+        <div class="measure" id="measure"></div>
+        <div class="stage" id="stage">
+          <canvas id="card" aria-label="Flattened card with measurement lines"></canvas>
+          <canvas id="loupe" width="264" height="264" hidden></canvas>
+        </div>
+        <p class="small muted"><span style="color:var(--outer);font-weight:700">Green</span> lines = the card's edges. <span style="color:var(--inner);font-weight:700">Pink</span> lines = where the border meets the picture. Red boxes = edge wear; yellow boxes = check by eye.</p>
+        <button class="btn secondary" id="editToggle" aria-pressed="false">Adjust lines</button>
+        <div id="editPanel" class="panel" style="padding:12px" hidden>
+          <p class="small">Pick a line, then drag it on the card or use the arrows. The loupe shows a close-up while you drag.</p>
+          <div class="chips" id="lineChips"></div>
+          <div class="nudge">
+            <button class="btn secondary" id="nudgeMinus" aria-label="Move line left or up">◀ / ▲</button>
+            <button class="btn secondary" id="nudgePlus" aria-label="Move line right or down">▶ / ▼</button>
+            <div class="seg" role="group" aria-label="Step size">
+              <button id="step1" aria-pressed="true">1px</button><button id="step025" aria-pressed="false">¼px</button>
+            </div>
+          </div>
+          <label class="switch"><input type="checkbox" id="borderless"> No printed border (full-art card)</label>
+          <div class="row">
+            <button class="btn secondary" id="autoLines">Find borders again</button>
+            <button class="btn secondary" id="rotate">Rotate 90°</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Corners up close</span>
+        <div class="corners" id="corners"></div>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Centering targets</span>
+        <div class="targets" id="targets"></div>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Everything we found</span>
+        <div class="findings" id="findings"></div>
+      </section>
+
+      <section class="panel report">
+        <span class="eyebrow">Report</span>
+        <p class="small muted">A single picture with the card, corners, edges and all the findings, to keep or send.</p>
+        <button class="btn secondary" id="makeReport">Make report picture</button>
+        <img id="reportImg" alt="Pre-grade report" hidden>
+        <div class="row" id="reportActions" hidden>
+          <button class="btn" id="shareReport">Share report</button>
+        </div>
+        <p class="small muted" id="reportHint" hidden>Press and hold the picture to save it to Photos.</p>
+      </section>
+  </div>
+
+  <footer>A pre-grade estimate from photos only. Surface scratches, print lines and dents aren't checked.</footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // ---------- worker RPC ----------
+  const worker = new Worker("worker.js");
+  let nextId = 1;
+  const pending = new Map();
+  let engineReady = false;
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.type === "status") setStatus(m.text, "");
+    else if (m.type === "ready") { engineReady = true; setStatus("Ready. Works offline once loaded.", "ready"); updateGradeButton(); }
+    else if (m.type === "fatal") { setStatus("The grader couldn't start: " + m.text, "err"); }
+    else if (m.id && pending.has(m.id)) {
+      const { resolve, reject } = pending.get(m.id); pending.delete(m.id);
+      m.ok ? resolve(m.result) : reject(new Error(m.error));
+    }
+  };
+  function call(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      const transfer = args.filter((a) => a instanceof Uint8Array).map((a) => a.buffer);
+      worker.postMessage({ id, fn, args }, transfer);
+    });
+  }
+  function setStatus(text, kind) {
+    $("statusText").textContent = text;
+    $("dot").className = "dot" + (kind ? " " + kind : "");
+  }
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+  // ---------- photo slots ----------
+  const files = { front: null, back: null };
+  function setupSlot(name) {
+    const slot = $("slot-" + name), input = $("file-" + name), img = slot.querySelector("img"), empty = slot.querySelector(".slot-empty");
+    input.addEventListener("change", () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      files[name] = f;
+      img.src = URL.createObjectURL(f); img.hidden = false; empty.hidden = true;
+      if (!slot.querySelector(".clear")) {
+        const b = document.createElement("button");
+        b.className = "clear"; b.type = "button"; b.textContent = "×"; b.setAttribute("aria-label", "Remove " + name + " photo");
+        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); files[name] = null; input.value = "";
+          img.hidden = true; empty.hidden = false; b.remove(); updateGradeButton(); });
+        slot.appendChild(b);
+      }
+      updateGradeButton();
+    });
+  }
+  setupSlot("front"); setupSlot("back");
+  function updateGradeButton() { $("grade").disabled = !(engineReady && files.front); }
+
+  async function prepare(file) {
+    // Decode (iPhone HEIC included), apply orientation, cap the size so the phone has memory to spare.
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image(); img.src = url; await img.decode();
+      const s = Math.min(1, 3200 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.95));
+      return new Uint8Array(await blob.arrayBuffer());
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  // ---------- state ----------
+  const views = { front: null, back: null };
+  let current = "front", summary = null, sel = 1, step = 1, editing = false;
+  const LINES = [["outer","left"],["inner","left"],["outer","right"],["inner","right"],["outer","top"],["inner","top"],["outer","bottom"],["inner","bottom"]];
+  const vertical = (side) => side === "left" || side === "right";
+  const images = {};
+
+  function showError(msg) { const e = $("error"); e.textContent = msg; e.hidden = !msg; }
+  function busy(text) { $("progress").hidden = !text; $("progressText").textContent = text || ""; $("grade").disabled = !!text || !(engineReady && files.front); }
+
+  $("grade").addEventListener("click", async () => {
+    showError("");
+    try {
+      for (const name of ["front", "back"]) {
+        if (!files[name]) { views[name] = null; await call("clear", name); continue; }
+        busy(`Measuring the ${name}…`);
+        const bytes = await prepare(files[name]);
+        views[name] = await call("load", name, bytes);
+      }
+      current = "front";
+      await refreshAll();
+      $("results").hidden = false;
+      $("verdict").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) { showError("Something went wrong: " + e.message); }
+    finally { busy(""); }
+  });
+
+  async function refreshAll() {
+    summary = await call("summary");
+    renderSummary();
+    await renderSide();
+  }
+
+  // ---------- summary ----------
+  function renderSummary() {
+    const v = summary.verdict;
+    const vd = $("verdict");
+    vd.className = "panel verdict " + (v ? v.level : "");
+    vd.innerHTML = "";
+    if (v) {
+      const h = document.createElement("h2"); h.textContent = v.headline; vd.appendChild(h);
+      const ul = document.createElement("ul");
+      v.reasons.forEach((r) => { const li = document.createElement("li"); li.textContent = r; ul.appendChild(li); });
+      vd.appendChild(ul);
+    }
+    const g = $("grades"); g.innerHTML = "";
+    summary.predictions.forEach((p) => {
+      const row = document.createElement("div"); row.className = "grade";
+      const co = el("span", "co", p.company);
+      let lab, pct, sub;
+      if (!p.available) { lab = el("span", "lab", "n/a"); pct = el("span", "pct", ""); sub = "Nothing measurable in this photo."; }
+      else if (!p.has_odds) { lab = el("span", "lab", "up to " + p.label); pct = el("span", "pct", ""); sub = "Edges only; centering not included."; }
+      else {
+        lab = el("span", "lab", p.label); pct = el("span", "pct", Math.round(p.probability * 100) + "%");
+        const others = p.distribution.filter((d) => d[0] !== p.label).map((d) => `${d[0]} ${Math.round(d[1] * 100)}%`);
+        sub = others.length ? "Otherwise " + others.join(", ") + "." : "Based on centering and edges.";
+        if (p.if_marks_real) sub += ` If the yellow-boxed marks are real wear: ${p.if_marks_real}.`;
+      }
+      row.append(co, lab, pct, el("span", "sub", sub));
+      g.appendChild(row);
+    });
+    const p0 = summary.predictions[0];
+    $("conf").innerHTML = "";
+    if (p0) {
+      const c = el("span", "pill " + ({ high: "good", medium: "check", low: "problem" })[p0.confidence], "Confidence: " + p0.confidence);
+      $("conf").append(c, document.createTextNode(p0.confidence_why.length ? "  " + p0.confidence_why.join("; ") + "." : ""));
+    }
+    const t = $("targets"); t.innerHTML = "";
+    summary.checks.forEach((ch) => {
+      const r = el("div", "target"); r.append(el("span", "", ch.name), el("span", "pill " + (ch.status || "info"), (ch.status || "n/a").toUpperCase()));
+      t.appendChild(r);
+    });
+    const f = $("findings"); f.innerHTML = "";
+    let sec = null, topic = null;
+    summary.findings.forEach((it) => {
+      if (it.topic !== topic) { topic = it.topic; sec = el("section"); sec.appendChild(el("h3", "", topic)); f.appendChild(sec); }
+      const row = el("div", "finding"); row.append(el("span", "pill " + it.kind, it.label), el("p", "", it.text));
+      sec.appendChild(row);
+    });
+    $("tab-back").disabled = !views.back;
+    $("reportImg").hidden = true; $("reportActions").hidden = true; $("reportHint").hidden = true;
+  }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+  // ---------- side view ----------
+  async function renderSide() {
+    const v = views[current];
+    $("tab-front").setAttribute("aria-pressed", current === "front");
+    $("tab-back").setAttribute("aria-pressed", current === "back");
+    if (!v) return;
+    const c = v.centering, m = $("measure");
+    m.innerHTML = "";
+    if (v.borderless) m.append(el("div", "", "No border: judge centering by eye."));
+    else {
+      const a = el("div"); a.append(el("span", "", "Left / right"), el("b", "", c.lr_text),
+        el("span", "", `${c.mm.left.toFixed(2)} / ${c.mm.right.toFixed(2)} mm · ±${c.sigma_lr.toFixed(1)}`));
+      const b = el("div"); b.append(el("span", "", "Top / bottom"), el("b", "", c.tb_text),
+        el("span", "", `${c.mm.top.toFixed(2)} / ${c.mm.bottom.toFixed(2)} mm · ±${c.sigma_tb.toFixed(1)}`));
+      m.append(a, b);
+    }
+    $("borderless").checked = !!v.borderless;
+    if (!images[current] || images[current].src !== "data:image/jpeg;base64," + v.image) {
+      const img = new Image(); img.src = "data:image/jpeg;base64," + v.image; await img.decode(); images[current] = img;
+    }
+    draw();
+    renderChips();
+    const cr = await call("corners", current);
+    const box = $("corners"); box.innerHTML = "";
+    ["top-left", "top-right", "bottom-left", "bottom-right"].forEach((k) => {
+      const fig = el("figure"); const im = new Image(); im.src = "data:image/jpeg;base64," + cr[k]; im.alt = `${k} corner, zoomed`;
+      fig.append(im, el("figcaption", "", k)); box.appendChild(fig);
+    });
+  }
+
+  function geometry() {
+    const v = views[current], cv = $("card"), img = images[current];
+    const cssW = cv.clientWidth || cv.parentElement.clientWidth;
+    const k = cssW / img.naturalWidth;            // css px per display-image px
+    return { v, cv, img, k, s: v.display_scale }; // s: display px per full-res px
+  }
+  function draw(hl) {
+    const v = views[current], img = images[current]; if (!v || !img) return;
+    const cv = $("card"), dpr = window.devicePixelRatio || 1;
+    const cssW = cv.parentElement.clientWidth, cssH = cssW * img.naturalHeight / img.naturalWidth;
+    cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr); cv.style.height = cssH + "px";
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.drawImage(img, 0, 0, cssW, cssH);
+    const f = (cssW / img.naturalWidth) * v.display_scale; // css px per full-res px
+    const P = (x) => (x + 0.5) * f;
+    // defect boxes
+    v.spots.forEach((sp) => {
+      ctx.strokeStyle = sp.kind === "whitening" ? "#ff3b30" : sp.kind === "verify" ? "#ffd60a" : "#ff9f0a";
+      ctx.lineWidth = 2; const pad = 6;
+      ctx.strokeRect(P(sp.x) - pad, P(sp.y) - pad, sp.w * f + 2 * pad, sp.h * f + 2 * pad);
+    });
+    LINES.forEach(([kind, side], i) => {
+      if (kind === "inner" && v.borderless) return;
+      const val = v[kind][side];
+      ctx.strokeStyle = kind === "outer" ? css("--outer") : css("--inner");
+      ctx.lineWidth = editing && i === sel ? 3 : 1.25;
+      ctx.beginPath();
+      if (vertical(side)) { ctx.moveTo(P(val), 0); ctx.lineTo(P(val), cssH); }
+      else { ctx.moveTo(0, P(val)); ctx.lineTo(cssW, P(val)); }
+      ctx.stroke();
+    });
+    if (hl) drawLoupe(hl.x, hl.y);
+  }
+  function drawLoupe(cx, cy) {
+    // cx, cy in css px on the card canvas
+    const L = $("loupe"), v = views[current], img = images[current];
+    L.hidden = false;
+    const ctx = L.getContext("2d"), cv = $("card");
+    const zoom = 6, size = L.width, src = size / zoom;
+    const scale = cv.width / cv.clientWidth;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(cv, cx * scale - src * scale / 2, cy * scale - src * scale / 2, src * scale, src * scale, 0, 0, size, size);
+    ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(size / 2, 0); ctx.lineTo(size / 2, size); ctx.moveTo(0, size / 2); ctx.lineTo(size, size / 2); ctx.stroke();
+    // keep the loupe away from the finger
+    L.style.left = cx < cv.clientWidth / 2 ? "auto" : "8px";
+    L.style.right = cx < cv.clientWidth / 2 ? "8px" : "auto";
+  }
+
+  function renderChips() {
+    const box = $("lineChips"); box.innerHTML = "";
+    const v = views[current];
+    LINES.forEach(([kind, side], i) => {
+      if (kind === "inner" && v && v.borderless) return;
+      const b = el("button", "chip");
+      const sw = el("i"); sw.style.background = kind === "outer" ? css("--outer") : css("--inner");
+      b.append(sw, document.createTextNode(`${kind === "outer" ? "Edge" : "Border"} ${side}`));
+      b.setAttribute("aria-pressed", i === sel);
+      b.addEventListener("click", () => { sel = i; renderChips(); draw(); });
+      box.appendChild(b);
+    });
+  }
+
+  // ---------- editing ----------
+  let commitTimer = null, outerTouched = false;
+  function scheduleCommit(rescan) {
+    outerTouched = outerTouched || rescan;
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commit, 450);
+  }
+  async function commit() {
+    const v = views[current]; if (!v) return;
+    const rescan = outerTouched; outerTouched = false;
+    try {
+      busy(rescan ? "Re-checking edges…" : "Updating…");
+      views[current] = await call("set_lines", current, v.outer, v.inner, $("borderless").checked, rescan);
+      summary = await call("summary"); renderSummary(); await renderSide();
+    } catch (e) { showError(e.message); } finally { busy(""); }
+  }
+  function nudge(dir) {
+    const v = views[current]; if (!v) return;
+    const [kind, side] = LINES[sel];
+    v[kind][side] += dir * step;
+    draw();
+    scheduleCommit(kind === "outer");
+  }
+  $("nudgeMinus").addEventListener("click", () => nudge(-1));
+  $("nudgePlus").addEventListener("click", () => nudge(1));
+  $("step1").addEventListener("click", () => { step = 1; $("step1").setAttribute("aria-pressed", true); $("step025").setAttribute("aria-pressed", false); });
+  $("step025").addEventListener("click", () => { step = 0.25; $("step025").setAttribute("aria-pressed", true); $("step1").setAttribute("aria-pressed", false); });
+  $("borderless").addEventListener("change", () => { const v = views[current]; if (v) { v.borderless = $("borderless").checked; draw(); renderChips(); scheduleCommit(false); } });
+  $("autoLines").addEventListener("click", async () => { busy("Finding borders…"); try { views[current] = await call("auto_borders", current); await refreshAll(); } catch (e) { showError(e.message); } finally { busy(""); } });
+  $("rotate").addEventListener("click", async () => { busy("Rotating…"); try { views[current] = await call("rotate", current); delete images[current]; await refreshAll(); } catch (e) { showError(e.message); } finally { busy(""); } });
+  $("editToggle").addEventListener("click", () => {
+    editing = !editing;
+    $("editToggle").setAttribute("aria-pressed", editing);
+    $("editToggle").textContent = editing ? "Done adjusting" : "Adjust lines";
+    $("editPanel").hidden = !editing; $("stage").classList.toggle("editing", editing);
+    draw();
+  });
+  $("tab-front").addEventListener("click", () => { current = "front"; renderSide(); });
+  $("tab-back").addEventListener("click", () => { if (views.back) { current = "back"; renderSide(); } });
+
+  let drag = null;
+  const stage = $("card");
+  stage.addEventListener("pointerdown", (e) => {
+    if (!editing || !views[current]) return;
+    const r = stage.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const v = views[current], img = images[current], f = (r.width / img.naturalWidth) * v.display_scale;
+    let best = 1e9, bi = -1;
+    LINES.forEach(([kind, side], i) => {
+      if (kind === "inner" && v.borderless) return;
+      const p = (v[kind][side] + 0.5) * f, d = vertical(side) ? Math.abs(x - p) : Math.abs(y - p);
+      if (d < best) { best = d; bi = i; }
+    });
+    if (best > 28) return;
+    sel = bi; renderChips();
+    drag = { f };
+    stage.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    draw({ x, y });
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const r = stage.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const [kind, side] = LINES[sel], v = views[current];
+    v[kind][side] = Math.round(((vertical(side) ? x : y) / drag.f - 0.5) * 4) / 4;
+    draw({ x, y });
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    drag = null; $("loupe").hidden = true; draw();
+    scheduleCommit(LINES[sel][0] === "outer");
+  };
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+  window.addEventListener("resize", () => draw());
+
+  // ---------- report ----------
+  let reportBlob = null;
+  $("makeReport").addEventListener("click", async () => {
+    busy("Making the report picture…");
+    try {
+      const b64 = await call("report_png");
+      const bin = atob(b64), arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      reportBlob = new Blob([arr], { type: "image/png" });
+      const img = $("reportImg"); img.src = URL.createObjectURL(reportBlob); img.hidden = false;
+      const file = new File([reportBlob], "card-pregrade.png", { type: "image/png" });
+      const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+      $("reportActions").hidden = !canShare; $("reportHint").hidden = false;
+    } catch (e) { showError(e.message); } finally { busy(""); }
+  });
+  $("shareReport").addEventListener("click", async () => {
+    if (!reportBlob) return;
+    const file = new File([reportBlob], "card-pregrade.png", { type: "image/png" });
+    try { await navigator.share({ files: [file], title: "Card pre-grade", text: summary && summary.verdict ? summary.verdict.headline : "" }); }
+    catch (e) { /* cancelled */ }
+  });
+})();
+</script>
+</body>
+</html>
