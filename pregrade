@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launch the card pre-grader with the project venv.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/.venv/bin/python" -m pregrader "$@"
