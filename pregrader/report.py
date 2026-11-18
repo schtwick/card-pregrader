@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from . import defects, findings, standards
+from . import defects, findings, standards, surface
 from .centering import Lines, ratio_text
 from .pipeline import Analysis, Side, to_json
 
@@ -74,6 +74,8 @@ def overlay(side: Side, grid: bool = True, show_defects: bool = True) -> np.ndar
         img = defects.annotate(img, side.scan, side.px_per_mm)
     else:
         img = img.copy()
+    if show_defects and side.surface is not None:
+        img = surface.annotate(img, side.surface, side.px_per_mm)
     H, W = img.shape[:2]
     ln: Lines = side.lines
     o, i = ln.outer, ln.inner

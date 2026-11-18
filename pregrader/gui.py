@@ -109,6 +109,9 @@ class App(tk.Tk):
         ttk.Button(bar2, text="Auto inner borders", command=self.auto_borders).pack(side="left")
         ttk.Button(bar2, text="Rotate 90°", command=self.rotate).pack(side="left", padx=4)
         ttk.Button(bar2, text="Scan edges", command=self.scan).pack(side="left")
+        ttk.Separator(bar2, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Button(bar2, text="Add surface photos…", command=self.add_surface).pack(side="left")
+        ttk.Button(bar2, text="Clear surface photos", command=self.clear_surface).pack(side="left", padx=4)
         ttk.Button(bar, text="Export report…", command=self.export).pack(side="right")
 
         body = ttk.Frame(self)
@@ -449,6 +452,45 @@ class App(tk.Tk):
         self.refresh()
         self.set_status(f"Edge scan: {sc.severity}, {len(sc.whitening)} whitening spot(s).")
 
+    def add_surface(self) -> None:
+        s = self.side
+        if s is None:
+            messagebox.showinfo("Load the card first", "Open the normal photo of this side first.")
+            return
+        paths = filedialog.askopenfilenames(
+            title=f"Angled-light photos of the {s.name}",
+            filetypes=[("Images", "*.jpg *.jpeg *.png *.heic *.heif *.tif *.tiff *.webp"), ("All files", "*.*")])
+        if not paths:
+            return
+        self.config(cursor="watch")
+        self.update_idletasks()
+        try:
+            for p in paths:
+                s.surface_photos.append(pipeline.load_image(p))
+            pipeline.scan_side(s, self.sens_var.get())
+        except Exception as e:  # noqa: BLE001 - show any load failure
+            messagebox.showerror("Could not add photo", str(e))
+        finally:
+            self.config(cursor="")
+        sc = s.surface
+        msg = f"Surface: {sc.photos_used} photo(s) used" if sc else "Surface: no photos"
+        if sc and sc.photos_rejected:
+            msg += f", {sc.photos_rejected} couldn't be lined up"
+        if sc:
+            msg += f" - {len(sc.defects)} defect(s) found."
+        self.set_status(msg)
+        self.refresh()
+
+    def clear_surface(self) -> None:
+        s = self.side
+        if s is None:
+            return
+        s.surface_photos.clear()
+        s.surface_cache.clear()
+        s.surface = None
+        self.refresh()
+        self.set_status("Surface photos removed.")
+
     def _schedule_rescan(self) -> None:
         if self._rescan_job:
             self.after_cancel(self._rescan_job)
@@ -563,6 +605,12 @@ class App(tk.Tk):
                 b = self.img2can(sp.x + sp.w + 6, sp.y + sp.h + 6)
                 col = {"whitening": "#ff3030", "verify": "#ffd000"}.get(sp.kind, "#ffa000")
                 c.create_rectangle(a[0] - 3, a[1] - 3, b[0] + 3, b[1] + 3, outline=col, width=2, tags="ov")
+        if self.show_defects.get() and s.surface is not None:
+            for d in s.surface.defects:
+                a = self.img2can(d.x - 8, d.y - 8)
+                b = self.img2can(d.x + d.w + 8, d.y + d.h + 8)
+                col = {"scratch": "#00a0ff", "crease": "#ff00a0", "dent": "#00e0e0", "mark": "#00e0e0"}[d.kind]
+                c.create_rectangle(a[0] - 3, a[1] - 3, b[0] + 3, b[1] + 3, outline=col, width=2, dash=(4, 2), tags="ov")
         for idx, (kind, side) in enumerate(LINE_ORDER):
             v = getattr(L, kind).get(side)
             selected = idx == self.sel
@@ -651,7 +699,7 @@ class App(tk.Tk):
         present = {k: v for k, v in self.sides.items() if v is not None and v.scan is not None}
         if present:
             checks = standards.target_checks(f, b)
-            sev = standards.worst_severity(*(sd.scan.severity for sd in present.values()))
+            sev = standards.worst_severity(*(pipeline.severity(sd) for sd in present.values()))
             v = pipeline.make_verdict(present, checks, sev)
             w("\n" + v.headline + "\n", {"send": "ok", "maybe": "warn", "skip": "bad"}[v.level], "big")
             for r in v.reasons:
@@ -661,8 +709,8 @@ class App(tk.Tk):
                 st = chk.status
                 w(f"  {(st or 'n/a').upper():<10} ", {"pass": "ok", "borderline": "warn", "fail": "bad"}.get(st, "muted"))
                 w(f"{chk.name}\n")
-            w("\nPredicted grade (centering + edges)\n", "h")
             preds = pipeline.predictions(present, sev)
+            w(f"\nPredicted grade ({preds[0].basis if preds else 'centering and edges'})\n", "h")
             for pr in preds:
                 if not pr.available or not pr.has_odds:
                     w(f"  {pr.summary()}\n", "warn")
@@ -713,6 +761,17 @@ class App(tk.Tk):
                 if sd.scan.textured_sides:
                     w(f"  Glitter/foil border ({', '.join(sd.scan.textured_sides)}): spots need a visual check\n",
                       "warn")
+            sc = sd.surface
+            if sc is None or not sc.photos_used:
+                w("  Surface: not checked (Add surface photos…)\n", "muted")
+            else:
+                w(f"  Surface: {sc.severity} ({len(sc.defects)} found, {sc.photos_used} photo(s))\n",
+                  "ok" if sc.severity == "none" else "bad")
+                for d in sc.defects[:6]:
+                    w(f"    • {d.kind} {d.size_mm:.1f} mm, {d.location}\n", "muted")
+            if sc is not None:
+                for n in sc.notes:
+                    w(f"  {n}\n", "warn")
             if sd.quality is not None:
                 for lv, msg in sd.quality.issues:
                     w(f"  Photo: {msg}\n", "bad" if lv == "bad" else "warn")

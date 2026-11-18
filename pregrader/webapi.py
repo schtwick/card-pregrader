@@ -58,7 +58,35 @@ def side_view(name: str) -> dict:
             "lr_text": centering.ratio_text(c.lr), "tb_text": centering.ratio_text(c.tb),
         },
         "quality": [{"level": lv, "text": t} for lv, t in (s.quality.issues if s.quality else [])],
+        "surface": None if not s.surface else {
+            "photos_used": s.surface.photos_used, "photos_rejected": s.surface.photos_rejected,
+            "severity": s.surface.severity, "notes": s.surface.notes,
+            "defects": [vars(d) for d in s.surface.defects]},
+        "surface_photos": len(s.surface_photos),
     }
+
+
+def add_surface(name: str, data: bytes, check: bool = True) -> dict:
+    """Add an angled-light photo of this side; re-check the surface unless more photos
+    are about to be added (check=False)."""
+    s = _sides[name]
+    if s is None:
+        raise ValueError("Grade the normal photo of this side first.")
+    img = cv2.imdecode(np.frombuffer(bytes(data), np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Couldn't read that image. Try a JPG or PNG.")
+    s.surface_photos.append(img)
+    if check:
+        pipeline.scan_side(s, _sensitivity)
+    return side_view(name)
+
+
+def clear_surface(name: str) -> dict:
+    s = _sides[name]
+    s.surface_photos.clear()
+    s.surface_cache.clear()
+    s.surface = None
+    return side_view(name)
 
 
 def set_lines(name: str, outer: dict, inner: dict, borderless: bool, rescan: bool) -> dict:

@@ -189,6 +189,34 @@ def _edges(face: str, s) -> List[Finding]:
     return out
 
 
+_KIND_TEXT = {
+    "scratch": "a scratch about {size:.1f} mm long",
+    "crease": "a crease about {size:.0f} mm long - creases usually mean a grade of 5 or lower",
+    "dent": "a dent or pit about {size:.1f} mm across",
+    "mark": "a small surface mark about {size:.1f} mm (a short scratch or a small dent - check by eye)",
+}
+
+
+def _surface(face: str, s) -> List[Finding]:
+    sc = getattr(s, "surface", None)
+    if sc is None or not sc.photos_used:
+        tip = ("Surface not checked. Add two angled-light photos (light skimming across the card from "
+               "the side, then from the top) to look for scratches, dents and creases.")
+        out = [Finding(INFO, "Surface", f"{face}: {tip}")]
+        if sc is not None:
+            out += [Finding(CHECK, "Surface", f"{face}: {n}") for n in sc.notes]
+        return out
+    out: List[Finding] = []
+    for d in sc.defects:
+        out.append(Finding(PROBLEM, "Surface", f"{face} surface, {d.location}: " + _KIND_TEXT[d.kind].format(size=d.size_mm) + "."))
+    if not sc.defects:
+        msg = f"{face}: no scratches, dents or creases found in {_n(sc.photos_used, 'angled-light photo')}"
+        msg += "." if sc.foil_fraction < 0.05 else " (outside the foil/holo areas)."
+        out.append(Finding(GOOD, "Surface", msg))
+    out += [Finding(CHECK, "Surface", f"{face}: {n}") for n in sc.notes]
+    return out
+
+
 def build(a) -> List[Finding]:
     f: List[Finding] = []
     v = a.verdict
@@ -243,6 +271,8 @@ def build(a) -> List[Finding]:
             f.extend(_squareness(name.title(), s.squareness))
     for name, s in a.sides.items():
         f.extend(_edges(name.title(), s))
+    for name, s in a.sides.items():
+        f.extend(_surface(name.title(), s))
 
     for pr in getattr(a, "predictions", []):
         if not pr.available:
@@ -271,8 +301,10 @@ def build(a) -> List[Finding]:
         f.append(Finding(INFO, "Grade estimate", f"{ce.company}: best possible grade (ceiling) {ce.label} ({why}; "
                          "surface not included)."))
 
-    f.append(Finding(INFO, "Not checked", "Surface (scratches, print lines, dents, stains, fingerprints) and "
-                     "how sharp the corners are under magnification. Tilt the card under a bright light and "
+    surf = any(getattr(s, "surface", None) and s.surface.photos_used for s in a.sides.values())
+    f.append(Finding(INFO, "Not checked", ("Print lines, stains, fingerprints and how sharp the corners are under "
+                     "magnification" if surf else "Surface (scratches, print lines, dents, stains, fingerprints) and "
+                     "how sharp the corners are under magnification") + ". Tilt the card under a bright light and "
                      "look for these before submitting."))
     for step in next_steps(a):
         f.append(Finding(INFO, "Next steps", step))
@@ -287,6 +319,8 @@ def next_steps(a) -> List[str]:
         if s.quality and s.quality.issues:
             steps.append(f"Retake the {name} photo: " + s.quality.issues[0][1])
             break
+    if not any(getattr(s, "surface", None) and s.surface.photos_used for s in a.sides.values()):
+        steps.append("Add two angled-light photos of the front to check the surface (see 'How to take the photos').")
     if any(sp.kind == "verify" for s in a.sides.values() for sp in s.scan.spots):
         steps.append("Look at the yellow-boxed spots under a bright light or loupe.")
     if any(v in ("low", "none") for s in a.sides.values() for v in s.lines.confidence.values()):

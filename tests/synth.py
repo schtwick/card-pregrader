@@ -110,3 +110,55 @@ def photo(borders_mm=(3.6, 2.4, 3.0, 3.0), nicks: List = (), **kw):
     card, mask = make_card(borders_mm=borders_mm, nicks=nicks, **kw)
     q = tilted_quad()
     return place(card, mask, q), q
+
+
+def surface_photos(defects=(), foil_box=None, ppm: float = 20.0, seed: int = 5,
+                   lights=((0.94, 0.0, 0.34),)):
+    """A card photographed once with even overhead light and once per entry in `lights`
+    with light skimming in from a low angle. `defects`: ("scratch", (x0,y0,x1,y1) mm,
+    depth px) | ("dent", (cx,cy) mm, radius mm) | ("crease", (x0,y0,x1,y1) mm).
+    Returns (main photo, [angled photos], main quad)."""
+    rng = np.random.default_rng(seed)
+    card, mask = make_card(ppm=ppm, seed=seed)
+    H, W = card.shape[:2]
+    h = np.zeros((H, W), np.float32)
+    for d in defects:
+        if d[0] in ("scratch", "crease"):
+            x0, y0, x1, y1 = (int(v * ppm) for v in d[1])
+            depth = d[2] if len(d) > 2 else (2.0 if d[0] == "scratch" else 6.0)
+            big = np.zeros((H * 4, W * 4), np.float32)
+            cv2.line(big, (x0 * 4, y0 * 4), (x1 * 4, y1 * 4), 1.0, 6 if d[0] == "scratch" else 12, cv2.LINE_AA)
+            line = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA)
+            h -= depth * cv2.GaussianBlur(line, (0, 0), 0.8 if d[0] == "scratch" else 2.0)
+        elif d[0] == "dent":
+            cx, cy = d[1][0] * ppm, d[1][1] * ppm
+            r = d[2] * ppm
+            yy, xx = np.mgrid[0:H, 0:W]
+            h -= 4.0 * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * (r / 2) ** 2))
+    gy, gx = np.gradient(h)
+    n = np.dstack([-gx, -gy, np.ones_like(h)])
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+
+    def shade(L, falloff):
+        L = np.array(L, np.float32) / np.linalg.norm(L)
+        s = np.clip(np.einsum("ijk,k->ij", n, L), 0, None) / L[2]
+        if falloff:
+            ramp = np.linspace(1.25, 0.75, W)[None, :]
+            s = s * ramp
+        return np.clip(0.15 + 0.85 * s, 0, 3)
+
+    def photo(L, falloff, foil, exposure, quad_angle, noise_seed):
+        img = card.astype(np.float32) * shade(L, falloff)[..., None] * exposure
+        if foil and foil_box is not None:
+            x0, y0, x1, y1 = (int(v * ppm) for v in foil_box)
+            field = cv2.resize(rng.uniform(0.5, 1.6, (12, 12, 3)).astype(np.float32), (x1 - x0, y1 - y0),
+                               interpolation=cv2.INTER_CUBIC)
+            fine = rng.uniform(0.7, 1.3, (y1 - y0, x1 - x0, 3)).astype(np.float32)
+            img[y0:y1, x0:x1] *= field * cv2.GaussianBlur(fine, (0, 0), 1.2)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+        q = tilted_quad(angle_deg=quad_angle, height=2300.0)
+        return place(img, mask, q, seed=noise_seed), q
+
+    main, q = photo((0.0, 0.0, 1.0), False, False, 1.0, 7.0, 1)
+    angled = [photo(L, True, True, 0.9, 7.0 + 1.5 * (i + 1), 10 + i)[0] for i, L in enumerate(lights)]
+    return main, angled, q

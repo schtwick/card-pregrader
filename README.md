@@ -131,6 +131,33 @@ along an edge, which usually means the outer line is sitting on a light backgrou
 7. **Photo quality**: brightness, per-side lighting balance, glare, edge sharpness
    (step size / steepest slope across the edge), resolution, background contrast.
 
+## Surface check (scratches, dents, creases)
+
+Surface damage only shows when light skims across the card, so this needs two extra
+photos of the same side, taken right after the normal one:
+
+1. Leave the card exactly where it is and turn off the room lights.
+2. Hold a lamp or a second phone's flashlight low on the **left**, about a hand's width
+   above the table, so the light skims across the card. Photograph from straight above.
+3. Move the light low to the **top** of the card and take another.
+
+Two directions matter: a crease running left-right barely shows when the light comes
+from the left. Add the photos with **Add surface photos…** (desktop), the Surface check
+section (phone) or `--front-surface a.jpg b.jpg` (command line).
+
+How it works: each angled photo is lined up pixel-for-pixel with the normal photo and
+divided by it. The printed artwork is the same in both and cancels; what's left is how
+the surface catches the light. Thin lines are scratches, long lines creases, and a light
+spot beside a dark spot is a dent. Very dark ink, foil/holo areas and broad glare can't
+be judged and are left out (the report says so). Small finds that could be a short
+scratch or a dent are reported as "small marks".
+
+Grade effect: a crease caps PSA at 5 (BGS/CGC below 7); other damage uses the same
+minor/moderate/heavy caps as edge wear.
+
+Tested on simulated cards (scratches, dents, creases, foil, JPEG), not yet on real
+photos. It can't see print lines, stains or fingerprints.
+
 ## Grading thresholds
 
 All thresholds are in `pregrader/standards.py`. The rows you specified are marked

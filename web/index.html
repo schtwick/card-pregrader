@@ -166,6 +166,10 @@ details ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; }
 .finding .pill { justify-self: start; margin-top: 2px; }
 
 .report img { border-radius: 8px; border: 1px solid var(--line); }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.filebtn { position: relative; text-align: center; display: block; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.defect-list { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; font-size: 0.93rem; }
 footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
 </style>
@@ -202,6 +206,7 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
       <li>Use bright, even light, like daylight near a window. No flash, no shadows across the card.</li>
       <li>Hold the phone straight above the card and get close: the card should fill most of the picture.</li>
       <li>Tap the card on screen to focus before you take the picture.</li>
+      <li>Optional, after grading: add two angled-light photos to check the surface for scratches and dents (instructions appear with the results).</li>
     </ul>
   </details>
 
@@ -231,7 +236,7 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
           <canvas id="card" aria-label="Flattened card with measurement lines"></canvas>
           <canvas id="loupe" width="264" height="264" hidden></canvas>
         </div>
-        <p class="small muted"><span style="color:var(--outer);font-weight:700">Green</span> lines = the card's edges. <span style="color:var(--inner);font-weight:700">Pink</span> lines = where the border meets the picture. Red boxes = edge wear; yellow boxes = check by eye.</p>
+        <p class="small muted"><span style="color:var(--outer);font-weight:700">Green</span> lines = the card's edges. <span style="color:var(--inner);font-weight:700">Pink</span> lines = where the border meets the picture. Red boxes = edge wear; yellow boxes = check by eye; dashed blue boxes = surface damage.</p>
         <button class="btn secondary" id="editToggle" aria-pressed="false">Adjust lines</button>
         <div id="editPanel" class="panel" style="padding:12px" hidden>
           <p class="small">Pick a line, then drag it on the card or use the arrows. The loupe shows a close-up while you drag.</p>
@@ -249,6 +254,22 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
             <button class="btn secondary" id="rotate">Rotate 90°</button>
           </div>
         </div>
+      </section>
+
+      <section class="panel" id="surfacePanel">
+        <span class="eyebrow">Surface check (scratches, dents, creases)</span>
+        <p class="small">Surface damage only shows when light skims across the card. Add two extra photos of this side:</p>
+        <ol class="small steps">
+          <li>Leave the card exactly where it is. Turn off the room lights.</li>
+          <li>Hold a lamp or a second phone's flashlight low on the <b>left</b>, about a hand's width above the table, so the light skims across the card. Take a photo from straight above, like before.</li>
+          <li>Move the light low to the <b>top</b> of the card and take another.</li>
+        </ol>
+        <label class="btn secondary filebtn" id="surfaceBtnLabel">
+          <span id="surfaceBtnText">Add angled-light photos of the front</span>
+          <input type="file" accept="image/*" multiple id="file-surface" aria-label="Angled-light photos">
+        </label>
+        <div id="surfaceResult" class="small"></div>
+        <button class="btn secondary" id="clearSurface" hidden>Remove angled-light photos</button>
       </section>
 
       <section class="panel">
@@ -343,7 +364,8 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
     const url = URL.createObjectURL(file);
     try {
       const img = new Image(); img.src = url; await img.decode();
-      const s = Math.min(1, 3200 / Math.max(img.naturalWidth, img.naturalHeight));
+      // full iPhone resolution (4032 px): hairline scratches vanish below ~25 px per mm
+      const s = Math.min(1, 4096 / Math.max(img.naturalWidth, img.naturalHeight));
       const c = document.createElement("canvas");
       c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
@@ -453,6 +475,7 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
       m.append(a, b);
     }
     $("borderless").checked = !!v.borderless;
+    renderSurface();
     if (!images[current] || images[current].src !== "data:image/jpeg;base64," + v.image) {
       const img = new Image(); img.src = "data:image/jpeg;base64," + v.image; await img.decode(); images[current] = img;
     }
@@ -465,6 +488,49 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
       fig.append(im, el("figcaption", "", k)); box.appendChild(fig);
     });
   }
+
+  function renderSurface() {
+    const v = views[current], box = $("surfaceResult");
+    $("surfaceBtnText").textContent = `Add angled-light photos of the ${current}`;
+    box.innerHTML = "";
+    const sc = v && v.surface;
+    $("clearSurface").hidden = !(v && v.surface_photos);
+    if (!sc) { box.textContent = "Not checked yet."; return; }
+    const head = el("p", "", `${sc.photos_used} photo${sc.photos_used === 1 ? "" : "s"} used` +
+      (sc.photos_rejected ? `, ${sc.photos_rejected} couldn't be lined up` : "") + ". ");
+    const pill = el("span", "pill " + (sc.severity === "none" ? "good" : sc.severity === "minor" ? "check" : "problem"),
+      sc.severity === "none" ? "NO DAMAGE FOUND" : sc.severity.toUpperCase());
+    head.prepend(pill, document.createTextNode(" "));
+    box.appendChild(head);
+    if (sc.defects.length) {
+      const ul = el("ul", "defect-list");
+      const name = { scratch: "Scratch", crease: "Crease", dent: "Dent or pit", mark: "Small mark (scratch or dent)" };
+      sc.defects.forEach((d) => ul.appendChild(el("li", "", `${name[d.kind]}, ${d.size_mm.toFixed(1)} mm, ${d.location}`)));
+      box.appendChild(ul);
+    }
+    sc.notes.forEach((n) => box.appendChild(el("p", "muted", n)));
+  }
+
+  $("file-surface").addEventListener("change", async () => {
+    const list = Array.from($("file-surface").files || []);
+    $("file-surface").value = "";
+    if (!list.length || !views[current]) return;
+    showError("");
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const last = i === list.length - 1;
+        busy(last ? "Checking the surface…" : `Adding photo ${i + 1} of ${list.length}…`);
+        views[current] = await call("add_surface", current, await prepare(list[i]), last);
+      }
+      summary = await call("summary"); renderSummary(); await renderSide();
+      $("surfacePanel").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) { showError(e.message); } finally { busy(""); }
+  });
+  $("clearSurface").addEventListener("click", async () => {
+    busy("Removing…");
+    try { views[current] = await call("clear_surface", current); summary = await call("summary"); renderSummary(); await renderSide(); }
+    catch (e) { showError(e.message); } finally { busy(""); }
+  });
 
   function geometry() {
     const v = views[current], cv = $("card"), img = images[current];
@@ -487,6 +553,14 @@ footer { font-size: 0.8rem; color: var(--muted); text-align: center; }
       ctx.lineWidth = 2; const pad = 6;
       ctx.strokeRect(P(sp.x) - pad, P(sp.y) - pad, sp.w * f + 2 * pad, sp.h * f + 2 * pad);
     });
+    if (v.surface) {
+      ctx.setLineDash([5, 3]); ctx.lineWidth = 2;
+      v.surface.defects.forEach((d) => {
+        ctx.strokeStyle = { scratch: "#0a84ff", crease: "#ff2d95", dent: "#00c7be", mark: "#00c7be" }[d.kind] || "#0a84ff";
+        const pad = 8; ctx.strokeRect(P(d.x) - pad, P(d.y) - pad, d.w * f + 2 * pad, d.h * f + 2 * pad);
+      });
+      ctx.setLineDash([]);
+    }
     LINES.forEach(([kind, side], i) => {
       if (kind === "inner" && v.borderless) return;
       const val = v[kind][side];

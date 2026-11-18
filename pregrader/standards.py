@@ -57,9 +57,9 @@ LADDERS: Dict[str, List[GradeStep]] = {
 
 # Highest grade still plausible given perimeter whitening severity (heuristic).
 DEFECT_CAPS: Dict[str, Dict[str, str]] = {
-    "PSA": {"minor": "9", "moderate": "8", "heavy": "7"},
-    "BGS": {"minor": "9", "moderate": "8.5", "heavy": "7"},
-    "CGC": {"minor": "9", "moderate": "8.5", "heavy": "7"},
+    "PSA": {"minor": "9", "moderate": "8", "heavy": "7", "severe": "5"},
+    "BGS": {"minor": "9", "moderate": "8.5", "heavy": "7", "severe": "below"},
+    "CGC": {"minor": "9", "moderate": "8.5", "heavy": "7", "severe": "below"},
 }
 
 # The four headline targets checked individually in the UI and report.
@@ -70,7 +70,18 @@ TARGETS = [
     ("CGC Pristine 10", "CGC", "Pristine 10"),
 ]
 
-SEVERITY_ORDER = ["none", "minor", "moderate", "heavy"]
+SEVERITY_ORDER = ["none", "minor", "moderate", "heavy", "severe"]   # severe = a crease
+
+
+def _cap_index(company: str, severity: str) -> int:
+    """Ladder position of the cap for this severity ("below" = under the lowest step)."""
+    cap = DEFECT_CAPS[company].get(severity)
+    ladder = LADDERS[company]
+    if not cap:
+        return 0
+    if cap == "below":
+        return len(ladder)
+    return next(i for i, s in enumerate(ladder) if s.label == cap)
 
 
 def step(company: str, label: str) -> GradeStep:
@@ -166,7 +177,7 @@ def grade_ceiling(company: str, front: Optional[Centering], back: Optional[Cente
     ladder = LADDERS[company]
     ic = _centering_index(company, front, back)
     cap = DEFECT_CAPS[company].get(severity)
-    idd = next(i for i, s in enumerate(ladder) if s.label == cap) if cap else 0
+    idd = _cap_index(company, severity)
 
     def label(i: int) -> str:
         return ladder[i].label if i < len(ladder) else f"below {ladder[-1].label}"
@@ -243,7 +254,7 @@ def grade_distribution(company: str, front: Optional[Centering], back: Optional[
         idx[passes_i] = i
     cap = DEFECT_CAPS[company].get(severity)
     if cap:
-        ci = next(i for i, s in enumerate(ladder) if s.label == cap)
+        ci = _cap_index(company, severity)
         idx = np.maximum(idx, ci)
     labels = [s.label for s in ladder] + [f"below {ladder[-1].label}"]
     counts = np.bincount(idx, minlength=len(labels)) / n

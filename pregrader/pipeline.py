@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import cv2
 import numpy as np
 
-from . import centering, defects, geometry, quality, standards
+from . import centering, defects, geometry, quality, standards, surface
 from .centering import Centering, Lines
 
 
@@ -57,6 +57,9 @@ class Side:
     spread: Dict[str, float] = field(default_factory=dict)
     squareness: Dict[str, centering.SideSquareness] = field(default_factory=dict)
     borderless: bool = False        # full-art card: centering is judged by eye, not measured
+    surface_photos: List[np.ndarray] = field(default_factory=list)   # angled-light shots
+    surface: Optional[surface.SurfaceScan] = None
+    surface_cache: dict = field(default_factory=dict, repr=False)
     quality: Optional[quality.Quality] = None
 
     @property
@@ -134,7 +137,20 @@ def auto_inner(side: Side) -> None:
 
 def scan_side(side: Side, sensitivity: float = 1.0) -> defects.DefectScan:
     side.scan = defects.scan_edges(side.img, side.lines.outer, side.px_per_mm, sensitivity)
+    side.surface = (surface.scan(side.img, side.lines.outer, side.px_per_mm, side.surface_photos,
+                                 cache=side.surface_cache) if side.surface_photos else None)
     return side.scan
+
+
+def add_surface_photo(side: Side, img: np.ndarray, sensitivity: float = 1.0) -> None:
+    side.surface_photos.append(img)
+    scan_side(side, sensitivity)
+
+
+def severity(side: Side) -> str:
+    """Worst condition problem on a side: edge whitening or surface damage."""
+    return standards.worst_severity(side.scan.severity if side.scan else None,
+                                    side.surface.severity if side.surface else None)
 
 
 @dataclass
@@ -171,17 +187,28 @@ def make_verdict(sides: Dict[str, Side], checks: List[standards.Check], severity
         maybe.append("Centering is within measurement error of the PSA 10 limit.")
     else:
         good.append("Centering clears PSA 10 with margin.")
-    if severity in ("moderate", "heavy"):
-        skip.append(f"Edge/corner whitening detected ({severity}).")
-    elif severity == "minor":
+    w_sev = standards.worst_severity(*(s.scan.severity for s in sides.values()))
+    if w_sev in ("moderate", "heavy"):
+        skip.append(f"Edge/corner whitening detected ({w_sev}).")
+    elif w_sev == "minor":
         maybe.append("Minor edge/corner whitening detected - check it under a light.")
+    checked = [s for s in sides.values() if s.surface and s.surface.photos_used]
+    s_sev = standards.worst_severity(*(s.surface.severity for s in checked))
+    found = [d for s in checked for d in s.surface.defects]
+    if s_sev in ("moderate", "heavy", "severe"):
+        kinds = sorted({d.kind for d in found})
+        skip.append(f"Surface damage found ({', '.join(kinds)}).")
+    elif s_sev == "minor":
+        maybe.append("A small surface mark was found - check it under a light.")
+    elif checked:
+        good.append("No scratches, dents or creases found on the surface.")
     verify = sum(1 for s in sides.values() for sp in s.scan.spots if sp.kind == "verify")
     if verify:
         why = "low-resolution photo" if any(s.scan.low_res for s in sides.values()) else "glitter/foil border"
         maybe.append(f"{verify} possible edge mark{'s' if verify != 1 else ''} to check by eye ({why}).")
     if any(s.scan.low_res for s in sides.values()):
         maybe.append("Photo resolution is too low to judge edge whitening - retake closer.")
-    elif (not severity or severity == "none") and not verify:
+    elif (not w_sev or w_sev == "none") and not verify:
         good.append("No edge whitening found.")
     if "back" not in sides:
         maybe.append("Back not photographed - PSA 10 also needs back centering (75/25) and clean back edges.")
@@ -195,7 +222,10 @@ def make_verdict(sides: Dict[str, Side], checks: List[standards.Check], severity
         return Verdict("skip", "Unlikely to get a PSA 10", skip + maybe)
     if maybe:
         return Verdict("maybe", "Borderline - check the flagged items before sending", maybe + good)
-    return Verdict("send", "Good PSA 10 candidate (centering & edges)", good)
+    if not checked:
+        good.append("Surface not checked - add two angled-light photos for a fuller answer.")
+        return Verdict("send", "Good PSA 10 candidate (centering & edges)", good)
+    return Verdict("send", "Good PSA 10 candidate (centering, edges & surface)", good)
 
 
 def analyze(sides: Dict[str, Optional[Side]], sensitivity: float = 1.0) -> Analysis:
@@ -205,7 +235,7 @@ def analyze(sides: Dict[str, Optional[Side]], sensitivity: float = 1.0) -> Analy
             scan_side(s, sensitivity)
     f = present["front"].graded_centering if "front" in present else None
     b = present["back"].graded_centering if "back" in present else None
-    sev = standards.worst_severity(*(s.scan.severity for s in present.values()))
+    sev = standards.worst_severity(*(severity(s) for s in present.values()))
     notes = []
     for s in present.values():
         if s.borderless:
@@ -262,8 +292,13 @@ def predictions(sides: Dict[str, Side], severity: str) -> List[standards.Predict
         why.insert(0, "photo quality is poor")
     has_c = f is not None or b is not None
     has_e = not all(s.scan.low_res for s in sides.values())
+    has_s = any(s.surface and s.surface.photos_used for s in sides.values())
     basis = {(True, True): "centering and edges", (False, True): "edges only",
              (True, False): "centering only", (False, False): "nothing"}[(has_c, has_e)]
+    if has_s and basis != "nothing":
+        basis = basis.replace(" and ", ", ").replace(" only", "") + " and surface"
+    elif has_s:
+        basis = "surface only"
     return [standards.predict(c, f, b, severity, unknown, why, bad, basis) for c in standards.LADDERS]
 
 
@@ -291,6 +326,10 @@ def to_json(a: Analysis) -> dict:
                 "textured_sides": s.scan.textured_sides,
                 "spots": [vars(sp) for sp in s.scan.spots],
             },
+            "surface": None if not s.surface else {
+                "photos_used": s.surface.photos_used, "photos_rejected": s.surface.photos_rejected,
+                "severity": s.surface.severity, "foil_fraction": round(s.surface.foil_fraction, 3),
+                "defects": [vars(d) for d in s.surface.defects], "notes": s.surface.notes},
         }
     for ch in a.checks:
         out["checks"].append({"target": ch.name, "front_limit": ch.front_limit, "back_limit": ch.back_limit,

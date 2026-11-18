@@ -25,6 +25,10 @@ def main(argv=None) -> int:
     a.add_argument("-o", "--out", help="report PNG path (default: <front>_pregrade.png)")
     a.add_argument("--sensitivity", type=float, default=1.0, help="whitening sensitivity, 0.5-2.0")
     a.add_argument("--save-warped", action="store_true", help="also save the flattened card image(s)")
+    a.add_argument("--front-surface", nargs="+", default=[], metavar="PHOTO",
+                   help="angled-light photos of the front (light from the side, then from the top)")
+    a.add_argument("--back-surface", nargs="+", default=[], metavar="PHOTO",
+                   help="angled-light photos of the back")
     a.add_argument("--no-border", choices=("front", "back", "both"),
                    help="full-art/borderless card: don't grade centering for that side")
     args = p.parse_args(argv)
@@ -40,6 +44,9 @@ def main(argv=None) -> int:
     for name, s in sides.items():
         if s is not None and args.no_border in (name, "both"):
             s.borderless = True
+        for p in (args.front_surface if name == "front" else args.back_surface):
+            if s is not None:
+                s.surface_photos.append(pipeline.load_image(p))
     for s in sides.values():
         if s is not None and not s.detected:
             print(f"warning: {s.name} card not detected automatically - use the GUI to place corners",
