@@ -1,6 +1,6 @@
 // Offline support: keep every file the app has loaded (engine, image tools, page) so it
 // opens and grades with no connection after the first visit. Bump VERSION to ship updates.
-const VERSION = "pregrader-v1";
+const VERSION = "pregrader-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
