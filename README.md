@@ -5,6 +5,18 @@ measures centering to sub-pixel precision, checks it against PSA / BGS / CGC
 centering limits, flags edge and corner whitening, and exports a visual report.
 No network access, no paid APIs.
 
+## Phone version (no computer needed)
+
+Open **https://schtwick.github.io/card-pregrader/** in Safari (iPhone) or Chrome (Android).
+The first visit downloads about 75 MB, so use Wi-Fi; after that it works offline. Tap
+Share, then **Add to Home Screen** for an app icon. All grading happens on the phone and
+photos are never uploaded.
+
+The phone app is `web/` (the same `pregrader` engine running in Pyodide). After changing
+the engine, run `.venv/bin/python web/build.py`, commit, and publish the web folder with
+`git subtree split --prefix web -b gh-pages && git push -f origin gh-pages`; bump
+`VERSION` in `web/sw.js` so phones pick up the update.
+
 ## Install
 
 You need Python 3.9+ **with Tk 8.6 or newer**. Apple's built-in `/usr/bin/python3`
